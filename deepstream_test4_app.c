@@ -331,7 +331,7 @@ osd_sink_pad_buffer_probe (GstPad * pad, GstPadProbeInfo * info,
       g_snprintf (txt_params->display_text, MAX_DISPLAY_LEN, "%s ",
                   pgie_classes_str[obj_meta->class_id]);
 
-      g_print ("Obj meta class id %s" , obj_meta->class_id);
+      g_print ("Obj meta class id %d" , obj_meta->class_id);
 
       if (obj_meta->class_id == PGIE_CLASS_ID_VEHICLE)
         vehicle_count++;
