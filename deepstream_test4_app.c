@@ -297,6 +297,7 @@ osd_sink_pad_buffer_probe (GstPad * pad, GstPadProbeInfo * info,
 
   NvDsBatchMeta *batch_meta = gst_buffer_get_nvds_batch_meta (buf);
   if (!batch_meta) {
+     g_print ("No batch meta");
     // No batch meta attached.
     return GST_PAD_PROBE_OK;
   }
@@ -305,6 +306,7 @@ osd_sink_pad_buffer_probe (GstPad * pad, GstPadProbeInfo * info,
     frame_meta = (NvDsFrameMeta *) l_frame->data;
 
     if (frame_meta == NULL) {
+      g_print ("No frame meta");
       // Ignore Null frame meta.
       continue;
     }
