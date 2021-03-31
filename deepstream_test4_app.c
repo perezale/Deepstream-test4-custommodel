@@ -34,7 +34,7 @@
 #define MAX_TIME_STAMP_LEN 32
 
 #define PGIE_CLASS_ID_VEHICLE 0
-#define PGIE_CLASS_ID_PERSON 2
+#define PGIE_CLASS_ID_PERSON 1
 
 #define PGIE_CONFIG_FILE  "mask_config_infer_primary.txt"
 #define MSCONV_CONFIG_FILE "dstest4_msgconv_config.txt"
@@ -58,9 +58,9 @@ static gint schema_type = 0;
 static gboolean display_off = FALSE;
 
 gint frame_number = 0;
-gchar pgie_classes_str[4][32] = { "Vehicle", "TwoWheeler", "Person",
-  "Roadsign"
-};
+gchar pgie_classes_str[2][32] = { "mask", "no-mask" };
+
+//gchar pgie_classes_str[4][32] = { "Vehicle", "TwoWheeler", "Person", "Roadsign" };
 
 GOptionEntry entries[] = {
   {"cfg-file", 'c', 0, G_OPTION_ARG_FILENAME, &cfg_file,
