@@ -239,7 +239,7 @@ static void
 generate_event_msg_meta (gpointer data, gint class_id, NvDsObjectMeta * obj_params)
 {
   NvDsEventMsgMeta *meta = (NvDsEventMsgMeta *) data;
-  g_print("class_id %s",class_id);
+  g_print("class_id %d",class_id);
   meta->sensorId = 0;
   meta->placeId = 0;
   meta->moduleId = 0;
