@@ -120,6 +120,7 @@ static gpointer meta_copy_func (gpointer data, gpointer user_data)
   }
 
   if (srcMeta->extMsgSize > 0) {
+    g_print("objType %d", srcMeta->objType);
     if (srcMeta->objType == NVDS_OBJECT_TYPE_VEHICLE) {
       NvDsVehicleObject *srcObj = (NvDsVehicleObject *) srcMeta->extMsg;
       NvDsVehicleObject *obj = (NvDsVehicleObject *) g_malloc0 (sizeof (NvDsVehicleObject));
