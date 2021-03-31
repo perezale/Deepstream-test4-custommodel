@@ -377,6 +377,7 @@ osd_sink_pad_buffer_probe (GstPad * pad, GstPadProbeInfo * info,
         msg_meta->frameId = frame_number;
         msg_meta->trackingId = obj_meta->object_id;
         msg_meta->confidence = obj_meta->confidence;
+        g_print("msgmeta  %d", obj_meta->object_id);
         generate_event_msg_meta (msg_meta, obj_meta->class_id, obj_meta);
 
         NvDsUserMeta *user_event_meta = nvds_acquire_user_meta_from_pool (batch_meta);
