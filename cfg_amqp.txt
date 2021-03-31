@@ -20,9 +20,9 @@
 # DEALINGS IN THE SOFTWARE.
 ################################################################################
 [message-broker]
-password = demo
+password = guest
 hostname = 52.41.161.245
-username = demo
+username = guest
 port = 5672
 exchange = ds_exchange
 topic = ds_topic
