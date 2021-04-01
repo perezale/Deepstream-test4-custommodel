@@ -435,7 +435,7 @@ main (int argc, char *argv[])
 {
   GMainLoop *loop = NULL;
   GstElement *pipeline = NULL, *source = NULL, *h264parser = NULL,
-      *decoder = NULL, *sink = NULL, *pgie = NULL, *nvvidconv0 = NULL, *nvvidconv = NULL,
+      *decoder = NULL, *sink = NULL, *pgie = NULL, *nvvidconv0 = NULL, *nvoverlaysink = NULL, *nvvidconv = NULL,
       *nvosd = NULL, *nvstreammux;
   GstElement *msgconv = NULL, *msgbroker = NULL, *tee = NULL;
   GstElement *queue1 = NULL, *queue2 = NULL;
@@ -498,6 +498,9 @@ main (int argc, char *argv[])
 
   /* Use convertor to convert from NV12 to RGBA as required by nvosd */
   nvvidconv0 = gst_element_factory_make ("nvvideoconvert", "nvvideo-converter0");
+
+  nvoverlaysink = gst_element_factory_make ("nvoverlaysink", "nvoverlaysink");
+
   nvvidconv = gst_element_factory_make ("nvvideoconvert", "nvvideo-converter");
 
   /* Create OSD to draw on the converted RGBA buffer */
@@ -531,7 +534,7 @@ main (int argc, char *argv[])
 #endif
   }
 
-  if (!pipeline || !source || !nvvidconv0 || /* !h264parser || !decoder || */  !nvstreammux || !pgie
+  if (!pipeline || !source || !nvvidconv0 || !nvoverlaysink || /* !h264parser || !decoder || */  !nvstreammux || !pgie
       || !nvvidconv || !nvosd || !msgconv || !msgbroker || !tee
       || !queue1 || !queue2 || !sink) {
     g_printerr ("One element could not be created. Exiting.\n");
@@ -576,7 +579,7 @@ main (int argc, char *argv[])
   /* Set up the pipeline */
   /* we add all elements into the pipeline */
   gst_bin_add_many (GST_BIN (pipeline),
-      source, nvvidconv0,/* h264parser, decoder,*/ nvstreammux, pgie,
+      source, nvvidconv0, nvoverlaysink, /* h264parser, decoder,*/ nvstreammux, pgie,
       nvvidconv, nvosd, tee, queue1, queue2, msgconv,
       msgbroker, sink, NULL);
 
@@ -596,7 +599,7 @@ main (int argc, char *argv[])
     return -1;
   }
 
-  src_pad = gst_element_get_static_pad (nvvidconv0, "src");
+  src_pad = gst_element_get_static_pad (nvoverlaysink, "src");
   if (!src_pad) {
     g_printerr ("Decoder request src pad failed. Exiting.\n");
     return -1;
@@ -610,7 +613,7 @@ main (int argc, char *argv[])
   gst_object_unref (sink_pad);
   gst_object_unref (src_pad);
 
-  if (!gst_element_link_many (source, nvvidconv0 /*, h264parser, decoder*/, NULL)) {
+  if (!gst_element_link_many (source, nvvidconv0, nvoverlaysink /*, h264parser, decoder*/, NULL)) {
     g_printerr ("Elements could not be linked. Exiting.\n");
     return -1;
   }
