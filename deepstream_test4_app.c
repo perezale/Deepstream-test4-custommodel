@@ -499,7 +499,7 @@ main (int argc, char *argv[])
   /* Use convertor to convert from NV12 to RGBA as required by nvosd */
   nvvidconv0 = gst_element_factory_make ("nvvideoconvert", "nvvideo-converter0");
 
-  nvoverlaysink = gst_element_factory_make ("nvoverlaysink", "nvoverlaysink");
+  nvoverlaysink = gst_element_factory_make ("nveglglessink", "nvvideo-sink");
 
   nvvidconv = gst_element_factory_make ("nvvideoconvert", "nvvideo-converter");
 
