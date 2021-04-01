@@ -497,7 +497,7 @@ main (int argc, char *argv[])
   pgie = gst_element_factory_make ("nvinfer", "primary-nvinference-engine");
 
   /* Use convertor to convert from NV12 to RGBA as required by nvosd */
-  nvvidconv0 = gst_element_factory_make ("nvvideoconvert", "nvvideo-converter0");
+  nvvidconv0 = gst_element_factory_make ("nvvideoconvert", "nvvideo-converter");
   nvvidconv = gst_element_factory_make ("nvvideoconvert", "nvvideo-converter");
 
   /* Create OSD to draw on the converted RGBA buffer */
