@@ -481,7 +481,7 @@ main (int argc, char *argv[])
   pipeline = gst_pipeline_new ("dstest4-pipeline");
 
   /* Source element for reading from the file */
-  source = gst_element_factory_make ("filesrc", "file-source");
+  source = gst_element_factory_make ("uridecodebin", "file-source");
 
   /* Since the data format in the input file is elementary h264 stream,
    * we need a h264parser */
@@ -538,7 +538,7 @@ main (int argc, char *argv[])
   }
 
   /* we set the input filename to the source element */
-  g_object_set (G_OBJECT (source), "location", input_file, NULL);
+  g_object_set (G_OBJECT (source), "uri", input_file, NULL);
 
   g_object_set (G_OBJECT (nvstreammux), "batch-size", 1, NULL);
 
