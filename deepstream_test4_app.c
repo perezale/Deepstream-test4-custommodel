@@ -530,7 +530,7 @@ main (int argc, char *argv[])
 #endif
   }
 
-  if (!pipeline || !source || !h264parser || !decoder || !nvstreammux || !pgie
+  if (!pipeline || !source || /* !h264parser || !decoder || */  !nvstreammux || !pgie
       || !nvvidconv || !nvosd || !msgconv || !msgbroker || !tee
       || !queue1 || !queue2 || !sink) {
     g_printerr ("One element could not be created. Exiting.\n");
@@ -575,7 +575,7 @@ main (int argc, char *argv[])
   /* Set up the pipeline */
   /* we add all elements into the pipeline */
   gst_bin_add_many (GST_BIN (pipeline),
-      source, h264parser, decoder, nvstreammux, pgie,
+      source, nvvidconv,/* h264parser, decoder,*/ nvstreammux, pgie,
       nvvidconv, nvosd, tee, queue1, queue2, msgconv,
       msgbroker, sink, NULL);
 
@@ -609,7 +609,7 @@ main (int argc, char *argv[])
   gst_object_unref (sink_pad);
   gst_object_unref (src_pad);
 
-  if (!gst_element_link_many (source, h264parser, decoder, NULL)) {
+  if (!gst_element_link_many (source, nvvidconv /*, h264parser, decoder*/, NULL)) {
     g_printerr ("Elements could not be linked. Exiting.\n");
     return -1;
   }
