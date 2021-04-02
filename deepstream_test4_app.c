@@ -49,6 +49,8 @@
  * based on the fastest source's framerate. */
 #define MUXER_BATCH_TIMEOUT_USEC 40000
 
+#define GST_CAPS_FEATURES_NVMM "memory:NVMM"
+
 static gchar *cfg_file = NULL;
 static gchar *input_file = NULL;
 static gchar *topic = NULL;
@@ -58,9 +60,8 @@ static gint schema_type = 0;
 static gboolean display_off = FALSE;
 
 gint frame_number = 0;
-gchar pgie_classes_str[2][32] = { "mask", "no-mask" };
 
-//gchar pgie_classes_str[4][32] = { "Vehicle", "TwoWheeler", "Person", "Roadsign" };
+gchar pgie_classes_str[2][32] = { "mask", "no-mask" };
 
 GOptionEntry entries[] = {
   {"cfg-file", 'c', 0, G_OPTION_ARG_FILENAME, &cfg_file,
@@ -120,7 +121,6 @@ static gpointer meta_copy_func (gpointer data, gpointer user_data)
   }
 
   if (srcMeta->extMsgSize > 0) {
-    g_print("objType %d", srcMeta->objType);
     if (srcMeta->objType == NVDS_OBJECT_TYPE_VEHICLE) {
       NvDsVehicleObject *srcObj = (NvDsVehicleObject *) srcMeta->extMsg;
       NvDsVehicleObject *obj = (NvDsVehicleObject *) g_malloc0 (sizeof (NvDsVehicleObject));
@@ -240,7 +240,6 @@ static void
 generate_event_msg_meta (gpointer data, gint class_id, NvDsObjectMeta * obj_params)
 {
   NvDsEventMsgMeta *meta = (NvDsEventMsgMeta *) data;
-  g_print("class_id %d",class_id);
   meta->sensorId = 0;
   meta->placeId = 0;
   meta->moduleId = 0;
@@ -299,7 +298,6 @@ osd_sink_pad_buffer_probe (GstPad * pad, GstPadProbeInfo * info,
 
   NvDsBatchMeta *batch_meta = gst_buffer_get_nvds_batch_meta (buf);
   if (!batch_meta) {
-     g_print ("No batch meta");
     // No batch meta attached.
     return GST_PAD_PROBE_OK;
   }
@@ -308,7 +306,6 @@ osd_sink_pad_buffer_probe (GstPad * pad, GstPadProbeInfo * info,
     frame_meta = (NvDsFrameMeta *) l_frame->data;
 
     if (frame_meta == NULL) {
-      g_print ("No frame meta");
       // Ignore Null frame meta.
       continue;
     }
@@ -319,7 +316,6 @@ osd_sink_pad_buffer_probe (GstPad * pad, GstPadProbeInfo * info,
       NvDsObjectMeta *obj_meta = (NvDsObjectMeta *) l_obj->data;
 
       if (obj_meta == NULL) {
-        g_print ("Object null");
         // Ignore Null object.
         continue;
       }
@@ -377,7 +373,6 @@ osd_sink_pad_buffer_probe (GstPad * pad, GstPadProbeInfo * info,
         msg_meta->frameId = frame_number;
         msg_meta->trackingId = obj_meta->object_id;
         msg_meta->confidence = obj_meta->confidence;
-        g_print("msgmeta  %ld", obj_meta->object_id);
         generate_event_msg_meta (msg_meta, obj_meta->class_id, obj_meta);
 
         NvDsUserMeta *user_event_meta = nvds_acquire_user_meta_from_pool (batch_meta);
@@ -430,18 +425,106 @@ bus_call (GstBus * bus, GstMessage * msg, gpointer data)
   return TRUE;
 }
 
+
+static void
+cb_newpad (GstElement * decodebin, GstPad * decoder_src_pad, gpointer data)
+{
+  g_print ("In cb_newpad\n");
+  GstCaps *caps = gst_pad_get_current_caps (decoder_src_pad);
+  const GstStructure *str = gst_caps_get_structure (caps, 0);
+  const gchar *name = gst_structure_get_name (str);
+  GstElement *source_bin = (GstElement *) data;
+  GstCapsFeatures *features = gst_caps_get_features (caps, 0);
+
+  /* Need to check if the pad created by the decodebin is for video and not
+   * audio. */
+  if (!strncmp (name, "video", 5)) {
+    /* Link the decodebin pad only if decodebin has picked nvidia
+     * decoder plugin nvdec_*. We do this by checking if the pad caps contain
+     * NVMM memory features. */
+    if (gst_caps_features_contains (features, GST_CAPS_FEATURES_NVMM)) {
+      /* Get the source bin ghost pad */
+      GstPad *bin_ghost_pad = gst_element_get_static_pad (source_bin, "src");
+      if (!gst_ghost_pad_set_target (GST_GHOST_PAD (bin_ghost_pad),
+              decoder_src_pad)) {
+        g_printerr ("Failed to link decoder src pad to source bin ghost pad\n");
+      }
+      gst_object_unref (bin_ghost_pad);
+    } else {
+      g_printerr ("Error: Decodebin did not pick nvidia decoder plugin.\n");
+    }
+  }
+}
+
+static void
+decodebin_child_added (GstChildProxy * child_proxy, GObject * object,
+    gchar * name, gpointer user_data)
+{
+  g_print ("Decodebin child added: %s\n", name);
+  if (g_strrstr (name, "decodebin") == name) {
+    g_signal_connect (G_OBJECT (object), "child-added",
+        G_CALLBACK (decodebin_child_added), user_data);
+  }
+}
+
+
+static GstElement *
+create_source_bin (guint index, gchar * uri)
+{
+  GstElement *bin = NULL, *uri_decode_bin = NULL;
+  gchar bin_name[16] = { };
+
+  g_snprintf (bin_name, 15, "source-bin-%02d", index);
+  /* Create a source GstBin to abstract this bin's content from the rest of the
+   * pipeline */
+  bin = gst_bin_new (bin_name);
+
+  /* Source element for reading from the uri.
+   * We will use decodebin and let it figure out the container format of the
+   * stream and the codec and plug the appropriate demux and decode plugins. */
+  uri_decode_bin = gst_element_factory_make ("uridecodebin", "uri-decode-bin");
+
+  if (!bin || !uri_decode_bin) {
+    g_printerr ("One element in source bin could not be created.\n");
+    return NULL;
+  }
+
+  /* We set the input uri to the source element */
+  g_object_set (G_OBJECT (uri_decode_bin), "uri", uri, NULL);
+
+  /* Connect to the "pad-added" signal of the decodebin which generates a
+   * callback once a new pad for raw data has beed created by the decodebin */
+  g_signal_connect (G_OBJECT (uri_decode_bin), "pad-added",
+      G_CALLBACK (cb_newpad), bin);
+  g_signal_connect (G_OBJECT (uri_decode_bin), "child-added",
+      G_CALLBACK (decodebin_child_added), bin);
+
+  gst_bin_add (GST_BIN (bin), uri_decode_bin);
+
+  /* We need to create a ghost pad for the source bin which will act as a proxy
+   * for the video decoder src pad. The ghost pad will not have a target right
+   * now. Once the decode bin creates the video decoder and generates the
+   * cb_newpad callback, we will set the ghost pad target to the video decoder
+   * src pad. */
+  if (!gst_element_add_pad (bin, gst_ghost_pad_new_no_target ("src",
+              GST_PAD_SRC))) {
+    g_printerr ("Failed to add ghost pad in source bin\n");
+    return NULL;
+  }
+
+  return bin;
+}
+
+
 int
 main (int argc, char *argv[])
 {
   GMainLoop *loop = NULL;
-  GstElement *pipeline = NULL, *source = NULL, *h264parser = NULL,
-      *decoder = NULL, *sink = NULL, *pgie = NULL, *nvvidconv0 = NULL,  *nvvidconv = NULL,
+   GstElement *pipeline = NULL, *source = NULL, *h264parser = NULL,
+      *decoder = NULL, *sink = NULL, *pgie = NULL, *nvvidconv = NULL,
       *nvosd = NULL, *nvstreammux;
   GstElement *msgconv = NULL, *msgbroker = NULL, *tee = NULL;
   GstElement *queue1 = NULL, *queue2 = NULL;
-  gchar *string1 = "video/x-raw(memory:NVMM),format=(string)NV12";
-  GstCaps *caps1;
-  caps1 = gst_caps_from_string(string1);
 #ifdef PLATFORM_TEGRA
   GstElement *transform = NULL;
 #endif
@@ -484,14 +567,14 @@ main (int argc, char *argv[])
   pipeline = gst_pipeline_new ("dstest4-pipeline");
 
   /* Source element for reading from the file */
-  source = gst_element_factory_make ("uridecodebin", "file-source");
+  //source = gst_element_factory_make ("filesrc", "file-source");
 
   /* Since the data format in the input file is elementary h264 stream,
    * we need a h264parser */
-  h264parser = gst_element_factory_make ("h264parse", "h264-parser");
+  //h264parser = gst_element_factory_make ("h264parse", "h264-parser");
 
   /* Use nvdec_h264 for hardware accelerated decode on GPU */
-  decoder = gst_element_factory_make ("nvv4l2decoder", "nvv4l2-decoder");
+  //decoder = gst_element_factory_make ("nvv4l2decoder", "nvv4l2-decoder");
 
   nvstreammux = gst_element_factory_make ("nvstreammux", "nvstreammux");
 
@@ -500,10 +583,6 @@ main (int argc, char *argv[])
   pgie = gst_element_factory_make ("nvinfer", "primary-nvinference-engine");
 
   /* Use convertor to convert from NV12 to RGBA as required by nvosd */
-  nvvidconv0 = gst_element_factory_make ("nvvideoconvert", "nvvideo-converter0");
-
-  
-
   nvvidconv = gst_element_factory_make ("nvvideoconvert", "nvvideo-converter");
 
   /* Create OSD to draw on the converted RGBA buffer */
@@ -537,7 +616,7 @@ main (int argc, char *argv[])
 #endif
   }
 
-  if (!pipeline || !source || !nvvidconv0 ||  /* !h264parser || !decoder || */  !nvstreammux || !pgie
+  if (!pipeline || /*!source || !h264parser || !decoder ||*/ !nvstreammux || !pgie
       || !nvvidconv || !nvosd || !msgconv || !msgbroker || !tee
       || !queue1 || !queue2 || !sink) {
     g_printerr ("One element could not be created. Exiting.\n");
@@ -545,9 +624,7 @@ main (int argc, char *argv[])
   }
 
   /* we set the input filename to the source element */
-  g_object_set (G_OBJECT (source), "uri", input_file, NULL);
-
-  g_object_set(G_OBJECT(nvvidconv0), "caps", caps1, NULL);
+  //g_object_set (G_OBJECT (source), "location", input_file, NULL);
 
   g_object_set (G_OBJECT (nvstreammux), "batch-size", 1, NULL);
 
@@ -584,7 +661,7 @@ main (int argc, char *argv[])
   /* Set up the pipeline */
   /* we add all elements into the pipeline */
   gst_bin_add_many (GST_BIN (pipeline),
-      source, nvvidconv0, /* h264parser, decoder,*/ nvstreammux, pgie,
+     /* source, h264parser, decoder,*/ nvstreammux, pgie,
       nvvidconv, nvosd, tee, queue1, queue2, msgconv,
       msgbroker, sink, NULL);
 
@@ -604,9 +681,18 @@ main (int argc, char *argv[])
     return -1;
   }
 
-  src_pad = gst_element_get_static_pad (nvvidconv0, "src");
+  GstElement *source_bin = create_source_bin (0, input_file);
+  
+  if (!source_bin) {
+    g_printerr ("Failed to create source bin. Exiting.\n");
+    return -1;
+  }
+
+  gst_bin_add (GST_BIN (pipeline), source_bin);
+
+  src_pad = gst_element_get_static_pad (source_bin, "src");
   if (!src_pad) {
-    g_printerr ("Decoder request src pad failed. Exiting.\n");
+    g_printerr ("Failed to get src pad of source bin. Exiting.\n");
     return -1;
   }
 
@@ -618,11 +704,11 @@ main (int argc, char *argv[])
   gst_object_unref (sink_pad);
   gst_object_unref (src_pad);
 
-  if (!gst_element_link_many (source, nvvidconv0 /*, h264parser, decoder*/, NULL)) {
+ /* if (!gst_element_link_many (source, h264parser, decoder, NULL)) {
     g_printerr ("Elements could not be linked. Exiting.\n");
     return -1;
   }
-
+*/
   if (!gst_element_link_many (nvstreammux, pgie, nvvidconv, nvosd, tee, NULL)) {
     g_printerr ("Elements could not be linked. Exiting.\n");
     return -1;
