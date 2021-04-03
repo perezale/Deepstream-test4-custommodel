@@ -520,8 +520,7 @@ int
 main (int argc, char *argv[])
 {
   GMainLoop *loop = NULL;
-   GstElement *pipeline = NULL, *source = NULL, *h264parser = NULL,
-      *decoder = NULL, *sink = NULL, *pgie = NULL, *nvvidconv = NULL,
+   GstElement *pipeline = NULL, *sink = NULL, *pgie = NULL, *nvvidconv = NULL,
       *nvosd = NULL, *nvstreammux;
   GstElement *msgconv = NULL, *msgbroker = NULL, *tee = NULL;
   GstElement *queue1 = NULL, *queue2 = NULL;
@@ -566,16 +565,6 @@ main (int argc, char *argv[])
   /* Create Pipeline element that will form a connection of other elements */
   pipeline = gst_pipeline_new ("dstest4-pipeline");
 
-  /* Source element for reading from the file */
-  //source = gst_element_factory_make ("filesrc", "file-source");
-
-  /* Since the data format in the input file is elementary h264 stream,
-   * we need a h264parser */
-  //h264parser = gst_element_factory_make ("h264parse", "h264-parser");
-
-  /* Use nvdec_h264 for hardware accelerated decode on GPU */
-  //decoder = gst_element_factory_make ("nvv4l2decoder", "nvv4l2-decoder");
-
   nvstreammux = gst_element_factory_make ("nvstreammux", "nvstreammux");
 
   /* Use nvinfer to run inferencing on decoder's output,
@@ -616,7 +605,7 @@ main (int argc, char *argv[])
 #endif
   }
 
-  if (!pipeline || /*!source || !h264parser || !decoder ||*/ !nvstreammux || !pgie
+  if (!pipeline || !nvstreammux || !pgie
       || !nvvidconv || !nvosd || !msgconv || !msgbroker || !tee
       || !queue1 || !queue2 || !sink) {
     g_printerr ("One element could not be created. Exiting.\n");
@@ -660,8 +649,7 @@ main (int argc, char *argv[])
 
   /* Set up the pipeline */
   /* we add all elements into the pipeline */
-  gst_bin_add_many (GST_BIN (pipeline),
-     /* source, h264parser, decoder,*/ nvstreammux, pgie,
+  gst_bin_add_many (GST_BIN (pipeline), nvstreammux, pgie,
       nvvidconv, nvosd, tee, queue1, queue2, msgconv,
       msgbroker, sink, NULL);
 
@@ -704,11 +692,6 @@ main (int argc, char *argv[])
   gst_object_unref (sink_pad);
   gst_object_unref (src_pad);
 
- /* if (!gst_element_link_many (source, h264parser, decoder, NULL)) {
-    g_printerr ("Elements could not be linked. Exiting.\n");
-    return -1;
-  }
-*/
   if (!gst_element_link_many (nvstreammux, pgie, nvvidconv, nvosd, tee, NULL)) {
     g_printerr ("Elements could not be linked. Exiting.\n");
     return -1;
