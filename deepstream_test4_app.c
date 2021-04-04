@@ -51,10 +51,14 @@
 
 #define GST_CAPS_FEATURES_NVMM "memory:NVMM"
 
+#define UDP_BITRATE "8000000" 
+
 static gchar *cfg_file = NULL;
 static gchar *input_file = NULL;
 static gchar *topic = NULL;
 static gchar *conn_str = NULL;
+static gchar *output_mediaserver_ip = NULL;
+static gint *output_mediaserver_port = NULL;
 static gchar *proto_lib = NULL;
 static gint schema_type = 0;
 static gboolean display_off = FALSE;
@@ -77,6 +81,10 @@ GOptionEntry entries[] = {
   {"schema", 's', 0, G_OPTION_ARG_INT, &schema_type,
    "Type of message schema (0=Full, 1=minimal), default=0", NULL},
   {"no-display", 0, 0, G_OPTION_ARG_NONE, &display_off, "Disable display", NULL},
+  {"output-mediaserver-ip", 0, 0, G_OPTION_ARG_STRING, &output_mediaserver_ip,
+   "MediaServer IP", NULL},
+  {"output-mediaserver-port", 0, 0, G_OPTION_ARG_INT, &output_mediaserver_port,
+   "MediaServer Port", NULL},
   {NULL}
 };
 
@@ -520,10 +528,14 @@ int
 main (int argc, char *argv[])
 {
   GMainLoop *loop = NULL;
-   GstElement *pipeline = NULL, *sink = NULL, *pgie = NULL, *nvvidconv = NULL,
+   GstElement *pipeline = NULL, *source_bin = NULL, 
+    *videoConvert = NULL, *videoConvertCapsFilter = NULL,
+    *nvvidconv0 = NULL, *encoder = NULL, *rtpPay = NULL, *rtpCapsFilter = NULL, *sink = NULL,
+    *pgie = NULL, *nvvidconv = NULL,
       *nvosd = NULL, *nvstreammux;
   GstElement *msgconv = NULL, *msgbroker = NULL, *tee = NULL;
   GstElement *queue1 = NULL, *queue2 = NULL;
+  GstCaps *rtpCaps = NULL, *videoConvertCaps = NULL;
 #ifdef PLATFORM_TEGRA
   GstElement *transform = NULL;
 #endif
@@ -593,6 +605,24 @@ main (int argc, char *argv[])
   /* Finally render the osd output */
   if (display_off) {
     sink = gst_element_factory_make ("fakesink", "nvvideo-renderer");
+    
+    if(output_mediaserver_port && output_mediaserver_ip) {
+      g_print ("Transmitting to: %s\n", output_mediaserver_ip);
+      /* 
+        nvv4l2h264enc \
+        maxperf-enable=1 bitrate=8000000 ! rtph264pay ! application/x-rtp,payload=(int)103,clock-rate=(int)90000 ! \
+        udpsink host=" + outputNodeIp  + " port=" + outputNodePort
+      */
+      videoConvert = gst_element_factory_make ("videoconvert", "video convert");
+      videoConvertCapsFilter = gst_element_factory_make ("capsfilter", "videoconvert-caps");
+      
+      nvvidconv0 = gst_element_factory_make ("nvvideoconvert", "converter");
+      encoder = gst_element_factory_make ("nvv4l2h264enc", "encoder");
+      rtpPay = gst_element_factory_make ("rtph264pay", "rtp-pay");
+      rtpCapsFilter = gst_element_factory_make ("capsfilter", "rtp-caps");
+      sink =  gst_element_factory_make ("udpsink", "udpsink");
+      
+    }
   } else {
     sink = gst_element_factory_make ("nveglglessink", "nvvideo-renderer");
 
@@ -640,7 +670,19 @@ main (int argc, char *argv[])
     g_object_set (G_OBJECT(msgbroker), "config", cfg_file, NULL);
   }
 
-  g_object_set (G_OBJECT (sink), "sync", TRUE, NULL);
+  if (output_mediaserver_ip && output_mediaserver_port)
+  {
+    g_object_set (G_OBJECT (encoder), "bitrate", UDP_BITRATE, NULL);
+    
+    g_object_set (G_OBJECT (rtpPay), "config-interval", 1, NULL);
+
+    g_object_set (G_OBJECT (sink), "host", output_mediaserver_ip, NULL);
+
+    g_object_set (G_OBJECT (sink), "port", output_mediaserver_port, NULL);
+  }
+  else {
+    g_object_set (G_OBJECT (sink), "sync", FALSE, NULL);
+  }
 
   /* we add a message handler */
   bus = gst_pipeline_get_bus (GST_PIPELINE (pipeline));
@@ -652,6 +694,16 @@ main (int argc, char *argv[])
   gst_bin_add_many (GST_BIN (pipeline), nvstreammux, pgie,
       nvvidconv, nvosd, tee, queue1, queue2, msgconv,
       msgbroker, sink, NULL);
+
+  if(output_mediaserver_port && output_mediaserver_ip) {
+    videoConvertCaps = gst_caps_from_string("video/x-raw, format=(string)I420");
+    g_object_set (G_OBJECT (videoConvertCapsFilter), "caps", videoConvertCaps, NULL);
+
+    rtpCaps = gst_caps_from_string ("application/x-rtp,payload=(int)103,clock-rate=(int)90000");
+    g_object_set (G_OBJECT (rtpCapsFilter), "caps", rtpCaps, NULL);
+
+    gst_bin_add_many (GST_BIN (pipeline), videoConvert, videoConvertCapsFilter, nvvidconv0, encoder, rtpPay, rtpCapsFilter, NULL);
+  }
 
 #ifdef PLATFORM_TEGRA
   if (!display_off)
@@ -669,7 +721,7 @@ main (int argc, char *argv[])
     return -1;
   }
 
-  GstElement *source_bin = create_source_bin (0, input_file);
+  source_bin = create_source_bin (0, input_file);
   
   if (!source_bin) {
     g_printerr ("Failed to create source bin. Exiting.\n");
@@ -709,15 +761,31 @@ main (int argc, char *argv[])
       return -1;
     }
   } else {
-    if (!gst_element_link (queue2, sink)) {
+    if (output_mediaserver_ip && output_mediaserver_port) {
+      if (!gst_element_link_many (queue2, videoConvert, videoConvertCapsFilter, nvvidconv0, encoder, rtpPay, rtpCapsFilter, sink, NULL)) {
+        g_printerr ("Elements could not be linked. Exiting.\n");
+        return -1;
+      }
+    }else {
+      if (!gst_element_link (queue2, sink)) {
+        g_printerr ("Elements could not be linked. Exiting.\n");
+        return -1;
+      }
+    }
+   
+  }
+  
+#else
+  if (output_mediaserver_ip && output_mediaserver_port) {
+    if (!gst_element_link_many (queue2, nvvidconv0, encoder, rtpPay, rtpCapsFilter, sink, NULL)) {
       g_printerr ("Elements could not be linked. Exiting.\n");
       return -1;
     }
-  }
-#else
-  if (!gst_element_link (queue2, sink)) {
-    g_printerr ("Elements could not be linked. Exiting.\n");
-    return -1;
+  }else {
+    if (!gst_element_link_many (queue2, sink, NULL)) {
+      g_printerr ("Elements could not be linked. Exiting.\n");
+      return -1;
+    }
   }
 #endif
 
@@ -760,6 +828,7 @@ main (int argc, char *argv[])
   /* Set the pipeline to "playing" state */
   g_print ("Now playing: %s\n", input_file);
   gst_element_set_state (pipeline, GST_STATE_PLAYING);
+  GST_DEBUG_BIN_TO_DOT_FILE(GST_BIN(pipeline), GST_DEBUG_GRAPH_SHOW_ALL, "pipeline");
 
   /* Wait till pipeline encounters an error or EOS */
   g_print ("Running...\n");
